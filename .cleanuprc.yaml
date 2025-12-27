@@ -1,0 +1,163 @@
+# Cleanup CLI 配置文件示例
+# 将此文件复制到 ~/.cleanuprc.yaml
+
+# Ollama 服务配置
+ollama:
+  baseUrl: http://localhost:11434
+  model: llama3.2
+  timeout: 30s
+
+# 文件整理规则 (按优先级从高到低执行)
+rules:
+  # 图片按日期整理
+  - name: images-by-date
+    priority: 100
+    condition:
+      type: extension
+      value: jpg,jpeg,png,gif,webp,bmp,tiff,heic
+      operator: match
+    action:
+      type: move
+      target: "Pictures/{year}/{month}"
+
+  # 视频文件
+  - name: videos
+    priority: 90
+    condition:
+      type: extension
+      value: mp4,mkv,avi,mov,wmv,flv,webm
+      operator: match
+    action:
+      type: move
+      target: "Videos/{year}"
+
+  # 音频文件
+  - name: audio
+    priority: 80
+    condition:
+      type: extension
+      value: mp3,wav,flac,aac,ogg,m4a
+      operator: match
+    action:
+      type: move
+      target: "Music"
+
+  # 文档按场景分类 (简历、面试、会议等)
+  - name: documents-by-scenario
+    priority: 75
+    condition:
+      type: extension
+      value: pdf,doc,docx,txt,md
+      operator: match
+    action:
+      type: move
+      target: "Documents/{category}"
+
+  # PDF 文档
+  - name: pdf-documents
+    priority: 70
+    condition:
+      type: extension
+      value: pdf
+      operator: match
+    action:
+      type: move
+      target: "Documents/PDF"
+
+  # Office 文档
+  - name: office-documents
+    priority: 60
+    condition:
+      type: extension
+      value: doc,docx,xls,xlsx,ppt,pptx
+      operator: match
+    action:
+      type: move
+      target: "Documents/Office"
+
+  # 文本文件
+  - name: text-files
+    priority: 50
+    condition:
+      type: extension
+      value: txt,md,rtf
+      operator: match
+    action:
+      type: move
+      target: "Documents/Text"
+
+  # 压缩文件
+  - name: archives
+    priority: 40
+    condition:
+      type: extension
+      value: zip,rar,7z,tar,gz,bz2
+      operator: match
+    action:
+      type: move
+      target: "Archives"
+
+  # 代码文件
+  - name: code-files
+    priority: 30
+    condition:
+      type: extension
+      value: go,py,js,ts,java,c,cpp,h,rs,rb
+      operator: match
+    action:
+      type: move
+      target: "Code"
+
+  # 大文件 (>100MB)
+  - name: large-files
+    priority: 20
+    condition:
+      type: size
+      value: "100MB"
+      operator: gt
+    action:
+      type: move
+      target: "LargeFiles"
+
+# 默认整理策略
+defaultStrategy:
+  useAI: true           # 使用 AI 分析
+  createFolders: true   # 自动创建目标文件夹
+  conflictStrategy: suffix  # 冲突处理: skip, suffix, overwrite, prompt
+
+# 事务日志路径
+transactionLogPath: ~/.cleanup/transactions.json
+
+# 回收站路径
+trashPath: ~/.cleanup/trash
+
+# 排除配置 - 跳过特定文件和文件夹
+exclude:
+  # 要排除的文件扩展名 (不带点)
+  extensions:
+    - log
+    - tmp
+    - temp
+    - cache
+  
+  # 要排除的文件名模式 (支持通配符)
+  patterns:
+    - "*.bak"
+    - "*.swp"
+    - "*~"
+    - ".DS_Store"
+    - "Thumbs.db"
+    - "desktop.ini"
+  
+  # 要排除的目录名
+  dirs:
+    - .git
+    - .svn
+    - .hg
+    - node_modules
+    - __pycache__
+    - .venv
+    - venv
+    - dist
+    - build
+    - target
