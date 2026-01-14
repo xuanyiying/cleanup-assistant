@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
 )
 
 // Engine defines the interface for rule matching and application

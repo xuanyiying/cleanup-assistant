@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
 	"pgregory.net/rapid"
 )
 

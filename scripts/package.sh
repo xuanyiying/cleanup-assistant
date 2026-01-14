@@ -209,7 +209,7 @@ brew uninstall cleanup
 
 ## Support
 
-For issues and questions, visit: https://github.com/user/cleanup-cli
+For issues and questions, visit: https://github.com/xuanyiying/cleanup-cli
 EOF
     
     print_success "Installation guide created"

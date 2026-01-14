@@ -58,9 +58,11 @@ linux:
 
 ## windows: Build for Windows
 windows:
-	@echo "Building for Windows..."
+	@echo "Building for Windows (amd64)..."
 	@mkdir -p $(BUILD_DIR)
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/cleanup
+	@echo "Building for Windows (x86)..."
+	GOOS=windows GOARCH=386 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-x86.exe ./cmd/cleanup
 	@echo "✓ Windows build complete"
 
 ## all-platforms: Build for all platforms

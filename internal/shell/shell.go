@@ -10,12 +10,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
-	"github.com/user/cleanup-cli/internal/ollama"
-	"github.com/user/cleanup-cli/internal/organizer"
-	"github.com/user/cleanup-cli/internal/rules"
-	"github.com/user/cleanup-cli/internal/transaction"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/ai"
+	"github.com/xuanyiying/cleanup-cli/internal/organizer"
+	"github.com/xuanyiying/cleanup-cli/internal/rules"
+	"github.com/xuanyiying/cleanup-cli/internal/transaction"
 )
 
 // InteractiveShell represents the interactive command-line interface
@@ -25,7 +25,7 @@ type InteractiveShell struct {
 	analyzer     analyzer.Analyzer
 	ruleEngine   rules.Engine
 	organizer    *organizer.Organizer
-	ollamaClient ollama.Client
+	ollamaClient ai.Client
 	targetDir    string
 	program      *tea.Program
 }
@@ -37,7 +37,7 @@ func NewInteractiveShell(
 	analyzer analyzer.Analyzer,
 	ruleEngine rules.Engine,
 	organizer *organizer.Organizer,
-	ollamaClient ollama.Client,
+	ollamaClient ai.Client,
 ) *InteractiveShell {
 	return &InteractiveShell{
 		configMgr:    configMgr,

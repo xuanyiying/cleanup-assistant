@@ -7,13 +7,19 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
-	"github.com/user/cleanup-cli/internal/ollama"
-	"github.com/user/cleanup-cli/internal/organizer"
-	"github.com/user/cleanup-cli/internal/rules"
-	"github.com/user/cleanup-cli/internal/shell"
-	"github.com/user/cleanup-cli/internal/transaction"
+	"github.com/xuanyiying/cleanup-cli/internal/ai"
+	"github.com/xuanyiying/cleanup-cli/internal/ai/openai"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/cleaner"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/ollama"
+	"github.com/xuanyiying/cleanup-cli/internal/organizer"
+	"github.com/xuanyiying/cleanup-cli/internal/output"
+	"github.com/xuanyiying/cleanup-cli/internal/rules"
+	"github.com/xuanyiying/cleanup-cli/internal/setup"
+	"github.com/xuanyiying/cleanup-cli/internal/shell"
+	"github.com/xuanyiying/cleanup-cli/internal/transaction"
+	"github.com/xuanyiying/cleanup-cli/internal/visualizer"
 )
 
 var (
@@ -25,14 +31,17 @@ var (
 	excludeExtensions []string
 	excludePatterns   []string
 	excludeDirs       []string
+	junkCategory      string
+	forceDelete       bool
 
 	// Global managers
-	configMgr    *config.Manager
-	txnMgr       *transaction.Manager
-	fileAnalyzer analyzer.Analyzer
-	ruleEngine   rules.Engine
+	configMgr     *config.Manager
+	txnMgr        *transaction.Manager
+	fileAnalyzer  analyzer.Analyzer
+	ruleEngine    rules.Engine
 	fileOrganizer *organizer.Organizer
-	ollamaClient ollama.Client
+	systemCleaner *cleaner.SystemCleaner
+	aiClient      ai.Client
 )
 
 var (
@@ -58,8 +67,9 @@ Use 'cleanup --help' to see available commands.`,
 
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
-	Use:   "scan [path]",
-	Short: "Scan a directory and analyze files",
+	Use:     "scan [path]",
+	Aliases: []string{"s", "sc"},
+	Short:   "Scan a directory and analyze files",
 	Long: `Scan a directory recursively and analyze all files.
 If no path is provided, the current directory is used.`,
 	Args: cobra.MaximumNArgs(1),
@@ -96,7 +106,7 @@ If no path is provided, the current directory is used.`,
 		if len(scanOpts.ExcludeDirs) > 0 {
 			fmt.Printf("Excluding directories: %v\n", scanOpts.ExcludeDirs)
 		}
-		
+
 		files, err := fileAnalyzer.AnalyzeDirectory(ctx, absPath, scanOpts)
 		if err != nil {
 			return fmt.Errorf("failed to scan directory: %w", err)
@@ -113,8 +123,9 @@ If no path is provided, the current directory is used.`,
 
 // organizeCmd represents the organize command
 var organizeCmd = &cobra.Command{
-	Use:   "organize [path]",
-	Short: "Organize files in a directory",
+	Use:     "organize [path]",
+	Aliases: []string{"o", "org"},
+	Short:   "Organize files in a directory",
 	Long: `Organize files in a directory based on configured rules.
 If no path is provided, the current directory is used.`,
 	Args: cobra.MaximumNArgs(1),
@@ -151,13 +162,21 @@ If no path is provided, the current directory is used.`,
 		if len(scanOpts.ExcludeDirs) > 0 {
 			fmt.Printf("Excluding directories: %v\n", scanOpts.ExcludeDirs)
 		}
-		
+
 		files, err := fileAnalyzer.AnalyzeDirectory(ctx, absPath, scanOpts)
 		if err != nil {
 			return fmt.Errorf("failed to scan directory: %w", err)
 		}
 
 		fmt.Printf("Found %d files\n", len(files))
+
+		// Capture state before execution for diff
+		diffRenderer := visualizer.NewDiffRenderer(output.NewConsole(os.Stdout))
+		preState, err := diffRenderer.CaptureState(absPath)
+		if err != nil {
+			// Log warning but continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to capture pre-execution state: %v\n", err)
+		}
 
 		// Generate organization plan
 		strategy := &organizer.OrganizeStrategy{
@@ -189,7 +208,7 @@ If no path is provided, the current directory is used.`,
 			fmt.Println("\n╔════════════════════════════════════════╗")
 			fmt.Println("║         Planned Operations             ║")
 			fmt.Println("╚════════════════════════════════════════╝")
-			
+
 			maxDisplay := 20
 			displayCount := len(plan.Operations)
 			if displayCount > maxDisplay {
@@ -230,6 +249,19 @@ If no path is provided, the current directory is used.`,
 			return fmt.Errorf("failed to execute plan: %w", err)
 		}
 
+		// Capture state after execution and show diff
+		if preState != nil {
+			postState, err := diffRenderer.CaptureState(absPath)
+			if err == nil {
+				diff := diffRenderer.Compare(preState, postState)
+				fmt.Println("\nChanges:")
+				fmt.Println(diffRenderer.Render(diff))
+				fmt.Println(diffRenderer.RenderSummary(diff))
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: failed to capture post-execution state: %v\n", err)
+			}
+		}
+
 		// Display results
 		fmt.Println("\n╔════════════════════════════════════════╗")
 		fmt.Println("║          Execution Results             ║")
@@ -262,8 +294,9 @@ If no path is provided, the current directory is used.`,
 
 // undoCmd represents the undo command
 var undoCmd = &cobra.Command{
-	Use:   "undo [transaction-id]",
-	Short: "Undo a previous file operation",
+	Use:     "undo [transaction-id]",
+	Aliases: []string{"u"},
+	Short:   "Undo a previous file operation",
 	Long: `Undo a previous file operation by transaction ID.
 If no transaction ID is provided, the last operation is undone.`,
 	Args: cobra.MaximumNArgs(1),
@@ -298,10 +331,11 @@ If no transaction ID is provided, the last operation is undone.`,
 
 // historyCmd represents the history command
 var historyCmd = &cobra.Command{
-	Use:   "history [limit]",
-	Short: "Show transaction history",
-	Long:  `Show recent file operation transactions.`,
-	Args:  cobra.MaximumNArgs(1),
+	Use:     "history [limit]",
+	Aliases: []string{"h", "hist"},
+	Short:   "Show transaction history",
+	Long:    `Show recent file operation transactions.`,
+	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		limit := 10
 		if len(args) > 0 {
@@ -330,15 +364,97 @@ var historyCmd = &cobra.Command{
 	},
 }
 
+// junkCmd represents the junk command
+var junkCmd = &cobra.Command{
+	Use:     "junk",
+	Aliases: []string{"j"},
+	Short:   "Manage system junk files",
+	Long:    `Scan and clean system junk files like caches, logs, and temporary files.`,
+}
+
+// junkScanCmd represents the junk scan command
+var junkScanCmd = &cobra.Command{
+	Use:     "scan",
+	Aliases: []string{"s", "sc"},
+	Short:   "Scan for junk files",
+	Long:    `Scan for junk files without deleting them.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// Configure cleaner from config
+		cfg, err := configMgr.Load()
+		if err == nil && cfg != nil && cfg.Cleaner != nil {
+			systemCleaner.Configure(cfg.Cleaner.JunkLocations, cfg.Cleaner.ImportantPatterns)
+		}
+
+		// Parse category
+		var categories []cleaner.JunkCategory
+		if junkCategory != "" && junkCategory != "all" {
+			categories = []cleaner.JunkCategory{cleaner.JunkCategory(junkCategory)}
+		}
+
+		opts := &cleaner.CleanOptions{
+			DryRun:     true, // Scan implies preview/dry-run
+			Categories: categories,
+		}
+
+		_, err = systemCleaner.Preview(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		// Preview already prints to console
+		return nil
+	},
+}
+
+// junkCleanCmd represents the junk clean command
+var junkCleanCmd = &cobra.Command{
+	Use:     "clean",
+	Aliases: []string{"c", "cl", "cls"},
+	Short:   "Clean junk files",
+	Long:    `Clean system junk files. Use --force to permanently delete.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// Configure cleaner from config
+		cfg, err := configMgr.Load()
+		if err == nil && cfg != nil && cfg.Cleaner != nil {
+			systemCleaner.Configure(cfg.Cleaner.JunkLocations, cfg.Cleaner.ImportantPatterns)
+		}
+
+		// Parse category
+		var categories []cleaner.JunkCategory
+		if junkCategory != "" && junkCategory != "all" {
+			categories = []cleaner.JunkCategory{cleaner.JunkCategory(junkCategory)}
+		}
+
+		opts := &cleaner.CleanOptions{
+			DryRun:      dryRun,
+			Force:       forceDelete,
+			Categories:  categories,
+			Interactive: true, // Default to interactive
+		}
+
+		_, err = systemCleaner.Clean(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("cleanup failed: %w", err)
+		}
+
+		return nil
+	},
+}
+
 // versionCmd represents the version command
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Show version information",
-	Long:  `Display the version of Cleanup CLI.`,
+	Use:     "version",
+	Aliases: []string{"v"},
+	Short:   "Show version information",
+	Long:    `Display the version of Cleanup CLI.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("Cleanup CLI v%s\n", Version)
 		fmt.Println("Intelligent file organization tool powered by Ollama")
-		fmt.Println("https://github.com/user/cleanup-cli")
+		fmt.Println("https://github.com/xuanyiying/cleanup-cli")
 	},
 }
 
@@ -395,6 +511,7 @@ func init() {
 	fileAnalyzer = analyzer.NewAnalyzer()
 	ruleEngine = rules.NewEngine()
 	fileOrganizer = organizer.NewOrganizerWithDeps(txnMgr, ruleEngine, fileAnalyzer)
+	systemCleaner = cleaner.NewSystemCleaner(txnMgr)
 
 	// Load configuration
 	cfg, err := configMgr.Load()
@@ -402,13 +519,25 @@ func init() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", err)
 	}
 
-	// Initialize Ollama client
+	// First run check: If config file doesn't exist, run setup wizard
+	if _, err := os.Stat(defaultConfigPath); os.IsNotExist(err) {
+		if err := setup.RunSetup(configMgr); err != nil {
+			fmt.Fprintf(os.Stderr, "Setup failed: %v\n", err)
+			// Continue with defaults if setup fails
+		} else {
+			// Reload config after setup
+			cfg, _ = configMgr.Load()
+		}
+	}
+
+	// Initialize AI client
 	if cfg != nil {
-		ollamaClient = ollama.NewClient(&ollama.Config{
-			BaseURL: cfg.Ollama.BaseURL,
-			Model:   cfg.Ollama.Model,
-			Timeout: cfg.Ollama.Timeout,
-		})
+		if cfg.AI.Provider == "openai" {
+			aiClient = openai.NewClient(&cfg.AI.OpenAI)
+		} else {
+			aiClient = ollama.NewClient(&cfg.Ollama)
+		}
+
 		// Load rules into rule engine
 		if len(cfg.Rules) > 0 {
 			if err := ruleEngine.LoadRules(cfg.Rules); err != nil {
@@ -416,11 +545,11 @@ func init() {
 			}
 		}
 	} else {
-		ollamaClient = ollama.NewClient(nil)
+		aiClient = ollama.NewClient(nil)
 	}
 
-	// Set Ollama client in organizer for AI features
-	fileOrganizer.SetOllamaClient(ollamaClient)
+	// Set AI client in organizer for AI features
+	fileOrganizer.SetOllamaClient(aiClient)
 
 	// Add persistent flags
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Path to configuration file")
@@ -430,27 +559,32 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&excludePatterns, "exclude-pattern", []string{}, "File name patterns to exclude (e.g., *.bak,temp*)")
 	rootCmd.PersistentFlags().StringSliceVar(&excludeDirs, "exclude-dir", []string{}, "Directory names to exclude (e.g., .git,node_modules)")
 
+	// Junk command flags
+	junkCmd.PersistentFlags().StringVarP(&junkCategory, "category", "c", "", "Filter by junk category (cache, logs, temp, trash, all)")
+	junkCleanCmd.Flags().BoolVarP(&forceDelete, "force", "f", false, "Permanently delete files instead of moving to trash")
+
 	// Add subcommands
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(organizeCmd)
 	rootCmd.AddCommand(undoCmd)
 	rootCmd.AddCommand(historyCmd)
+	rootCmd.AddCommand(junkCmd)
+	junkCmd.AddCommand(junkScanCmd)
+	junkCmd.AddCommand(junkCleanCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
 // interactiveMode enters the interactive shell
 func interactiveMode() error {
-	// Verify Ollama is available
+	// Verify AI service is available
 	ctx := context.Background()
-	if err := ollamaClient.CheckHealth(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Ollama service is not available\n")
-		fmt.Fprintf(os.Stderr, "Please ensure Ollama is running at http://localhost:11434\n")
-		fmt.Fprintf(os.Stderr, "Visit https://ollama.ai for installation instructions\n")
+	if err := aiClient.CheckHealth(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: AI service is not available: %v\n", err)
 		return err
 	}
 
 	// Create and start interactive shell
-	interactiveShell := shell.NewInteractiveShell(configMgr, txnMgr, fileAnalyzer, ruleEngine, fileOrganizer, ollamaClient)
+	interactiveShell := shell.NewInteractiveShell(configMgr, txnMgr, fileAnalyzer, ruleEngine, fileOrganizer, aiClient)
 	return interactiveShell.Start()
 }
 

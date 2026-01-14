@@ -8,11 +8,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
-	"github.com/user/cleanup-cli/internal/rules"
-	"github.com/user/cleanup-cli/internal/transaction"
-	"github.com/user/cleanup-cli/pkg/template"
+	"github.com/xuanyiying/cleanup-cli/internal/ai"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/rules"
+	"github.com/xuanyiying/cleanup-cli/internal/transaction"
+	"github.com/xuanyiying/cleanup-cli/pkg/template"
 )
 
 // ConflictStrategy defines how to handle file name conflicts
@@ -84,12 +85,12 @@ type PlanSummary struct {
 
 // BatchResult represents the result of batch processing
 type BatchResult struct {
-	Successful      int
-	Failed          int
-	Skipped         int
-	Errors          []error
-	TransactionIDs  []string
-	FailedFiles     map[string]error
+	Successful     int
+	Failed         int
+	Skipped        int
+	Errors         []error
+	TransactionIDs []string
+	FailedFiles    map[string]error
 }
 
 // OrganizeStrategy represents the strategy for organizing files
@@ -103,10 +104,10 @@ type OrganizeStrategy struct {
 
 // Organizer handles file organization operations
 type Organizer struct {
-	txnManager  *transaction.Manager
-	ruleEngine  rules.Engine
-	analyzer    analyzer.Analyzer
-	templateExp *template.Expander
+	txnManager   *transaction.Manager
+	ruleEngine   rules.Engine
+	analyzer     analyzer.Analyzer
+	templateExp  *template.Expander
 	ollamaClient interface {
 		SuggestName(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
 		SuggestCategory(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
@@ -135,10 +136,7 @@ func NewOrganizerWithDeps(txnManager *transaction.Manager, ruleEngine rules.Engi
 }
 
 // SetOllamaClient sets the Ollama client for AI-powered features
-func (o *Organizer) SetOllamaClient(client interface {
-	SuggestName(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
-	SuggestCategory(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
-}) {
+func (o *Organizer) SetOllamaClient(client ai.Client) {
 	o.ollamaClient = client
 }
 
@@ -575,7 +573,7 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 		// Step 0: Analyze document scenario if needed
 		if strategy.UseAI && file.NeedsScenarioAnalysis && o.ollamaClient != nil {
 			fmt.Printf("  📊 Analyzing document scenario: %s\n", file.Name)
-			
+
 			categories, err := o.ollamaClient.SuggestCategory(ctx, file)
 			if err == nil && len(categories) > 0 && categories[0] != "" {
 				file.ScenarioCategory = categories[0]
@@ -589,14 +587,14 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 		var renamedPath string
 		if strategy.UseAI && file.NeedsSmarterName && o.ollamaClient != nil {
 			fmt.Printf("  🤖 Analyzing: %s (filename quality: %s)\n", file.Name, file.FileNameQuality)
-			
+
 			// Use AI to suggest a better name
 			suggestions, err := o.ollamaClient.SuggestName(ctx, file)
 			if err == nil && len(suggestions) > 0 && suggestions[0] != "" {
 				file.SuggestedName = suggestions[0]
-				
+
 				fmt.Printf("     → Suggested name: %s.%s\n", file.SuggestedName, file.Extension)
-				
+
 				// Add rename operation
 				newName := file.SuggestedName + "." + file.Extension
 				renamedPath = filepath.Join(filepath.Dir(file.Path), newName)
@@ -609,7 +607,7 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 				plan.Operations = append(plan.Operations, op)
 				plan.Summary.RenameCount++
 				plan.Summary.TotalOperations++
-				
+
 				// Update file metadata for subsequent operations
 				file.Name = newName
 				file.Path = renamedPath
@@ -648,11 +646,11 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 		if action.Type == "move" {
 			// Use the renamed path as source if file was renamed
 			sourcePath := file.Path
-			
+
 			// Construct full target path with filename
 			targetDir := targetPath
 			targetFullPath := filepath.Join(targetDir, file.Name)
-			
+
 			op = &PlannedOperation{
 				Type:   OpMove,
 				Source: sourcePath,
@@ -767,7 +765,7 @@ func (o *Organizer) ExecutePlan(ctx context.Context, plan *OrganizePlan, strateg
 			defer mu.Unlock()
 
 			completed++
-			
+
 			// Print progress
 			if opResult != nil && opResult.Success {
 				fmt.Printf("  [%d/%d] ✓ %s: %s\n", completed, totalOps, operation.Type, filepath.Base(operation.Source))

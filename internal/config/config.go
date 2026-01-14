@@ -12,11 +12,33 @@ import (
 // CleanupConfig represents the complete configuration for the cleanup CLI
 type CleanupConfig struct {
 	Ollama             OllamaConfig      `yaml:"ollama" mapstructure:"ollama"`
+	AI                 AIConfig          `yaml:"ai" mapstructure:"ai"`
 	Rules              []*Rule           `yaml:"rules" mapstructure:"rules"`
 	DefaultStrategy    *OrganizeStrategy `yaml:"defaultStrategy" mapstructure:"defaultStrategy"`
 	TransactionLogPath string            `yaml:"transactionLogPath" mapstructure:"transactionLogPath"`
 	TrashPath          string            `yaml:"trashPath" mapstructure:"trashPath"`
 	Exclude            *ExcludeConfig    `yaml:"exclude" mapstructure:"exclude"`
+	Cleaner            *CleanerConfig    `yaml:"cleaner" mapstructure:"cleaner"`
+}
+
+// AIConfig represents the AI configuration
+type AIConfig struct {
+	Provider string       `yaml:"provider" mapstructure:"provider"`
+	OpenAI   OpenAIConfig `yaml:"openai" mapstructure:"openai"`
+}
+
+// OpenAIConfig represents OpenAI compatible service configuration
+type OpenAIConfig struct {
+	APIKey  string        `yaml:"apiKey" mapstructure:"apiKey"`
+	BaseURL string        `yaml:"baseUrl" mapstructure:"baseUrl"`
+	Model   string        `yaml:"model" mapstructure:"model"`
+	Timeout time.Duration `yaml:"timeout" mapstructure:"timeout"`
+}
+
+// CleanerConfig represents cleaner configuration
+type CleanerConfig struct {
+	JunkLocations     []string `yaml:"junkLocations" mapstructure:"junkLocations"`         // Custom junk locations
+	ImportantPatterns []string `yaml:"importantPatterns" mapstructure:"importantPatterns"` // Custom important file patterns
 }
 
 // ExcludeConfig represents files and directories to exclude from scanning
@@ -28,9 +50,11 @@ type ExcludeConfig struct {
 
 // OllamaConfig represents Ollama service configuration
 type OllamaConfig struct {
-	BaseURL string        `yaml:"baseUrl" mapstructure:"baseUrl"`
-	Model   string        `yaml:"model" mapstructure:"model"`
-	Timeout time.Duration `yaml:"timeout" mapstructure:"timeout"`
+	BaseURL   string                 `yaml:"baseUrl" mapstructure:"baseUrl"`
+	Model     string                 `yaml:"model" mapstructure:"model"`
+	Timeout   time.Duration          `yaml:"timeout" mapstructure:"timeout"`
+	ModelPath string                 `yaml:"modelPath" mapstructure:"modelPath"` // 模型存储路径
+	Params    map[string]interface{} `yaml:"params" mapstructure:"params"`       // 模型运行参数
 }
 
 // Rule represents a file organization rule
@@ -110,10 +134,13 @@ func (m *Manager) Save(config *CleanupConfig) error {
 
 	// Marshal config to viper
 	m.v.Set("ollama", config.Ollama)
+	m.v.Set("ai", config.AI)
 	m.v.Set("rules", config.Rules)
 	m.v.Set("defaultStrategy", config.DefaultStrategy)
 	m.v.Set("transactionLogPath", config.TransactionLogPath)
 	m.v.Set("trashPath", config.TrashPath)
+	m.v.Set("cleaner", config.Cleaner)
+	m.v.Set("exclude", config.Exclude)
 
 	// Write to file
 	if err := m.v.WriteConfigAs(m.path); err != nil {
@@ -141,6 +168,11 @@ func (m *Manager) setDefaults() {
 	m.v.SetDefault("ollama.model", "llama3.2")
 	m.v.SetDefault("ollama.timeout", 30*time.Second)
 
+	m.v.SetDefault("ai.provider", "ollama")
+	m.v.SetDefault("ai.openai.baseUrl", "https://api.openai.com/v1")
+	m.v.SetDefault("ai.openai.model", "gpt-4o-mini")
+	m.v.SetDefault("ai.openai.timeout", 30*time.Second)
+
 	m.v.SetDefault("defaultStrategy.useAI", true)
 	m.v.SetDefault("defaultStrategy.createFolders", true)
 	m.v.SetDefault("defaultStrategy.conflictStrategy", "suffix")
@@ -149,9 +181,12 @@ func (m *Manager) setDefaults() {
 	m.v.SetDefault("trashPath", filepath.Join(homeDir, ".cleanup", "trash"))
 
 	m.v.SetDefault("rules", []*Rule{})
-	
+
 	// 默认排除常见的系统和版本控制文件
 	m.v.SetDefault("exclude.extensions", []string{})
 	m.v.SetDefault("exclude.patterns", []string{".DS_Store", "Thumbs.db", "desktop.ini"})
 	m.v.SetDefault("exclude.dirs", []string{".git", ".svn", "node_modules", "__pycache__"})
+
+	m.v.SetDefault("cleaner.junkLocations", []string{})
+	m.v.SetDefault("cleaner.importantPatterns", []string{})
 }

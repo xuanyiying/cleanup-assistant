@@ -3,7 +3,7 @@
 
 class Cleanup < Formula
   desc "Intelligent file organization CLI tool powered by local Ollama models"
-  homepage "https://github.com/user/cleanup-cli"
+  homepage "https://github.com/xuanyiying/cleanup-cli"
   version "1.0.0"
   
   # For local installation, use file:// URL
@@ -11,7 +11,7 @@ class Cleanup < Formula
   # sha256 "..." # Calculate with: shasum -a 256 build/cleanup-1.0.0-darwin.tar.gz
   
   # For GitHub releases, use:
-  # url "https://github.com/user/cleanup-cli/releases/download/v1.0.0/cleanup-1.0.0-darwin.tar.gz"
+  # url "https://github.com/xuanyiying/cleanup-cli/releases/download/v1.0.0/cleanup-1.0.0-darwin.tar.gz"
   # sha256 "..."
   
   depends_on "ollama" => :recommended

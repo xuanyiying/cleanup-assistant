@@ -41,7 +41,7 @@ brew install cleanup
 
 ```bash
 # 下载二进制文件
-wget https://github.com/user/cleanup-cli/releases/download/v1.0.0/cleanup-linux-amd64
+wget https://github.com/xuanyiying/cleanup-cli/releases/download/v1.0.0/cleanup-linux-amd64
 
 # 安装
 sudo mv cleanup-linux-amd64 /usr/local/bin/cleanup
@@ -77,9 +77,9 @@ sudo chmod +x /usr/local/bin/cleanup
 
 ## 📚 文档
 
-- [完整文档](https://github.com/user/cleanup-cli/blob/main/README.md)
-- [安装指南](https://github.com/user/cleanup-cli/blob/main/INSTALL.md)
-- [配置示例](https://github.com/user/cleanup-cli/blob/main/.cleanuprc.yaml)
+- [完整文档](https://github.com/xuanyiying/cleanup-cli/blob/main/README.md)
+- [安装指南](https://github.com/xuanyiying/cleanup-cli/blob/main/INSTALL.md)
+- [配置示例](https://github.com/xuanyiying/cleanup-cli/blob/main/.cleanuprc.yaml)
 
 ## 🐛 已知问题
 

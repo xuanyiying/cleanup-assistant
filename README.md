@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/user/cleanup-cli)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/xuanyiying/cleanup-cli)
 
 智能文件整理命令行工具，通过本地 Ollama 模型实现文件的智能分类、重命名和归档。
 
@@ -15,6 +15,8 @@
 - ↩️ **事务回滚** - 所有操作可撤销，安全可靠
 - 🗑️ **安全删除** - 删除操作移至回收站，防止误删
 - ⚡ **批量处理** - 支持并发处理大量文件
+- 🧹 **系统清理** - 扫描并清理系统垃圾（缓存、日志、临时文件）
+- 📊 **可视化对比** - 清晰展示文件整理前后的目录结构差异
 - 🚫 **智能排除** - 自动跳过版本控制、依赖包等不需要整理的文件
 - 🖥️ **交互式界面** - 支持自然语言命令
 
@@ -112,23 +114,42 @@ cleanup organize ~/Downloads
 
 ## 使用方法
 
-### 基本命令
+### 常用命令
+
+| 命令                                | 别名      | 说明         |
+| ----------------------------------- | --------- | ------------ |
+| `cleanup`                           |           | 进入交互模式 |
+| `cleanup scan [path]`               | `s`, `sc` | 扫描目录     |
+| `cleanup organize [path]`           | `o`, `org`| 整理文件     |
+| `cleanup organize --dry-run [path]` | `o`       | 预览模式     |
+| `cleanup junk`                      | `j`       | 垃圾清理管理 |
+| `cleanup junk scan`                 | `j s`     | 扫描垃圾文件 |
+| `cleanup junk clean`                | `j c`     | 清理垃圾文件 |
+| `cleanup undo [txn-id]`             | `u`       | 撤销操作     |
+| `cleanup history`                   | `h`, `hist`| 查看历史     |
+| `cleanup version`                   | `v`       | 查看版本     |
+| `cleanup --help`                    |           | 查看帮助     |
+
+#### 简写示例
 
 ```bash
-# 扫描目录
-cleanup scan ~/Downloads
+# 扫描当前目录
+cleanup s
 
-# 整理文件
-cleanup organize ~/Downloads
+# 整理下载目录
+cleanup o ~/Downloads
 
-# 预览模式（不实际修改文件）
-cleanup organize --dry-run ~/Downloads
-
-# 撤销操作
-cleanup undo
+# 撤销上一步
+cleanup u
 
 # 查看历史
-cleanup history
+cleanup h
+
+# 扫描垃圾
+cleanup j s
+
+# 清理垃圾
+cleanup j c
 ```
 
 ### 排除文件和文件夹
@@ -150,11 +171,44 @@ cleanup organize ~/Projects \
   --exclude-dir .git,node_modules
 ```
 
+### 系统清理
+
+Cleanup 提供了专门的垃圾清理功能，可以安全地清理系统缓存、日志和临时文件。
+
+```bash
+# 扫描垃圾文件（预览模式）
+cleanup junk scan
+
+# 按类别扫描
+cleanup junk scan --category cache
+cleanup junk scan --category logs
+cleanup junk scan --category temp
+
+# 清理垃圾文件（移至回收站）
+cleanup junk clean
+
+# 清理并永久删除（慎用）
+cleanup junk clean --force
+
+# 交互式清理（默认开启）
+cleanup junk clean
+# 系统会逐个询问不确定的文件
+```
+
 ## 配置
 
 配置文件位于 `~/.cleanuprc.yaml`：
 
 ```yaml
+# AI 设置
+ai:
+  provider: ollama # 可选: ollama, openai
+  openai:
+    apiKey: "your-api-key"
+    baseUrl: "https://api.openai.com/v1" # 可选，支持兼容 OpenAI 的接口
+    model: "gpt-4"
+    timeout: 30s
+
 ollama:
   baseUrl: http://localhost:11434
   model: llama3.2
@@ -236,6 +290,18 @@ exclude:
     - .svn
     - node_modules
     - __pycache__
+
+# 清理器配置
+cleaner:
+  # 自定义垃圾文件位置
+  junkLocations:
+    - "~/Library/Caches/MyNewApp"
+    - "/tmp/my-temp-dir"
+  
+  # 自定义重要文件模式（清理时跳过）
+  importantPatterns:
+    - "*.key"
+    - "config.json"
 ```
 
 ### 规则配置

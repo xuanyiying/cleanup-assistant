@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cleanup-cli/internal/analyzer"
-	"github.com/user/cleanup-cli/internal/config"
-	"github.com/user/cleanup-cli/internal/organizer"
-	"github.com/user/cleanup-cli/internal/rules"
-	"github.com/user/cleanup-cli/internal/transaction"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
+	"github.com/xuanyiying/cleanup-cli/internal/organizer"
+	"github.com/xuanyiying/cleanup-cli/internal/rules"
+	"github.com/xuanyiying/cleanup-cli/internal/transaction"
 )
 
 // TestCompleteOrganizationWorkflow tests the complete scan-analyze-organize flow

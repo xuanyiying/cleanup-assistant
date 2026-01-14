@@ -88,16 +88,18 @@ cleanup undo
 
 ## 常用命令
 
-| 命令                                | 说明         |
-| ----------------------------------- | ------------ |
-| `cleanup`                           | 进入交互模式 |
-| `cleanup scan [path]`               | 扫描目录     |
-| `cleanup organize [path]`           | 整理文件     |
-| `cleanup organize --dry-run [path]` | 预览模式     |
-| `cleanup undo [txn-id]`             | 撤销操作     |
-| `cleanup history`                   | 查看历史     |
-| `cleanup version`                   | 查看版本     |
-| `cleanup --help`                    | 查看帮助     |
+| 命令                                | 别名      | 说明         |
+| ----------------------------------- | --------- | ------------ |
+| `cleanup`                           |           | 进入交互模式 |
+| `cleanup scan [path]`               | `s`, `sc` | 扫描目录     |
+| `cleanup organize [path]`           | `o`, `org`| 整理文件     |
+| `cleanup organize --dry-run [path]` | `o`       | 预览模式     |
+| `cleanup junk scan`                 | `j s`     | 扫描垃圾文件 |
+| `cleanup junk clean`                | `j c`     | 清理垃圾文件 |
+| `cleanup undo [txn-id]`             | `u`       | 撤销操作     |
+| `cleanup history`                   | `h`, `hist`| 查看历史     |
+| `cleanup version`                   | `v`       | 查看版本     |
+| `cleanup --help`                    |           | 查看帮助     |
 
 ## 排除文件和文件夹
 
@@ -237,7 +239,17 @@ cleanup organize ~/Documents \
 
 整理文档并跳过备份文件。
 
-### 场景 5: 撤销操作
+### 场景 5: 系统清理
+
+```bash
+# 扫描系统垃圾（缓存、临时文件等）
+cleanup junk scan
+
+# 执行清理（默认移至回收站）
+cleanup junk clean
+```
+
+### 场景 6: 撤销操作
 
 ```bash
 # 查看历史

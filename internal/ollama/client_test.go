@@ -10,19 +10,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/user/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
+	"github.com/xuanyiying/cleanup-cli/internal/config"
 )
 
 func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   *Config
-		expected *Config
+		config   *config.OllamaConfig
+		expected *config.OllamaConfig
 	}{
 		{
 			name:   "nil config uses defaults",
 			config: nil,
-			expected: &Config{
+			expected: &config.OllamaConfig{
 				BaseURL: "http://localhost:11434",
 				Model:   "llama3.2",
 				Timeout: 30 * time.Second,
@@ -30,10 +31,10 @@ func TestNewClient(t *testing.T) {
 		},
 		{
 			name: "partial config fills in defaults",
-			config: &Config{
+			config: &config.OllamaConfig{
 				BaseURL: "http://custom:11434",
 			},
-			expected: &Config{
+			expected: &config.OllamaConfig{
 				BaseURL: "http://custom:11434",
 				Model:   "llama3.2",
 				Timeout: 30 * time.Second,
@@ -41,12 +42,12 @@ func TestNewClient(t *testing.T) {
 		},
 		{
 			name: "full config is preserved",
-			config: &Config{
+			config: &config.OllamaConfig{
 				BaseURL: "http://custom:11434",
 				Model:   "custom-model",
 				Timeout: 60 * time.Second,
 			},
-			expected: &Config{
+			expected: &config.OllamaConfig{
 				BaseURL: "http://custom:11434",
 				Model:   "custom-model",
 				Timeout: 60 * time.Second,
@@ -67,31 +68,31 @@ func TestNewClient(t *testing.T) {
 
 func TestCheckHealth(t *testing.T) {
 	tests := []struct {
-		name        string
-		statusCode  int
+		name         string
+		statusCode   int
 		responseBody string
-		expectError bool
-		errorMsg    string
+		expectError  bool
+		errorMsg     string
 	}{
 		{
-			name:        "health check succeeds",
-			statusCode:  http.StatusOK,
+			name:         "health check succeeds",
+			statusCode:   http.StatusOK,
 			responseBody: `{"models":[]}`,
-			expectError: false,
+			expectError:  false,
 		},
 		{
-			name:        "service unavailable",
-			statusCode:  http.StatusServiceUnavailable,
+			name:         "service unavailable",
+			statusCode:   http.StatusServiceUnavailable,
 			responseBody: `{"error":"service unavailable"}`,
-			expectError: true,
-			errorMsg:    "health check failed with status 503",
+			expectError:  true,
+			errorMsg:     "health check failed with status 503",
 		},
 		{
-			name:        "not found",
-			statusCode:  http.StatusNotFound,
+			name:         "not found",
+			statusCode:   http.StatusNotFound,
 			responseBody: `{"error":"not found"}`,
-			expectError: true,
-			errorMsg:    "health check failed with status 404",
+			expectError:  true,
+			errorMsg:     "health check failed with status 404",
 		},
 	}
 
@@ -99,12 +100,13 @@ func TestCheckHealth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/api/tags", r.URL.Path)
+				assert.Equal(t, http.MethodGet, r.Method)
 				w.WriteHeader(tt.statusCode)
 				w.Write([]byte(tt.responseBody))
 			}))
 			defer server.Close()
 
-			client := NewClient(&Config{
+			client := NewClient(&config.OllamaConfig{
 				BaseURL: server.URL,
 				Model:   "test-model",
 				Timeout: 5 * time.Second,
@@ -122,7 +124,7 @@ func TestCheckHealth(t *testing.T) {
 }
 
 func TestCheckHealthConnectionError(t *testing.T) {
-	client := NewClient(&Config{
+	client := NewClient(&config.OllamaConfig{
 		BaseURL: "http://invalid-host-that-does-not-exist:11434",
 		Model:   "test-model",
 		Timeout: 1 * time.Second,
@@ -149,9 +151,9 @@ func TestAnalyze(t *testing.T) {
 			context:    "file.txt",
 			statusCode: http.StatusOK,
 			responseBody: generateResponse{
-				Model:    "llama3.2",
-				Response: "This is a text file",
-				Done:     true,
+				Model:     "llama3.2",
+				Response:  "This is a text file",
+				Done:      true,
 				EvalCount: 10,
 			},
 			expectError: false,
@@ -162,9 +164,9 @@ func TestAnalyze(t *testing.T) {
 			context:    "",
 			statusCode: http.StatusOK,
 			responseBody: generateResponse{
-				Model:    "llama3.2",
-				Response: "Analysis result",
-				Done:     true,
+				Model:     "llama3.2",
+				Response:  "Analysis result",
+				Done:      true,
 				EvalCount: 5,
 			},
 			expectError: false,
@@ -177,13 +179,13 @@ func TestAnalyze(t *testing.T) {
 			errorMsg:    "prompt cannot be empty",
 		},
 		{
-			name:        "server error",
-			prompt:      "What is this?",
-			context:     "",
-			statusCode:  http.StatusInternalServerError,
+			name:         "server error",
+			prompt:       "What is this?",
+			context:      "",
+			statusCode:   http.StatusInternalServerError,
 			responseBody: generateResponse{},
-			expectError: true,
-			errorMsg:    "analyze request failed with status 500",
+			expectError:  true,
+			errorMsg:     "analyze request failed with status 500",
 		},
 	}
 
@@ -204,7 +206,7 @@ func TestAnalyze(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(&Config{
+			client := NewClient(&config.OllamaConfig{
 				BaseURL: server.URL,
 				Model:   "test-model",
 				Timeout: 5 * time.Second,
@@ -243,7 +245,7 @@ func TestAnalyzeContextCombination(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(&Config{
+	client := NewClient(&config.OllamaConfig{
 		BaseURL: server.URL,
 		Model:   "test-model",
 		Timeout: 5 * time.Second,
@@ -303,7 +305,7 @@ func TestSuggestName(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(&Config{
+			client := NewClient(&config.OllamaConfig{
 				BaseURL: server.URL,
 				Model:   "test-model",
 				Timeout: 5 * time.Second,
@@ -360,7 +362,7 @@ func TestSuggestCategory(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewClient(&Config{
+			client := NewClient(&config.OllamaConfig{
 				BaseURL: server.URL,
 				Model:   "test-model",
 				Timeout: 5 * time.Second,
@@ -389,7 +391,7 @@ func TestAnalyzeTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(&Config{
+	client := NewClient(&config.OllamaConfig{
 		BaseURL: server.URL,
 		Model:   "test-model",
 		Timeout: 500 * time.Millisecond,
@@ -406,7 +408,7 @@ func TestCheckHealthTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(&Config{
+	client := NewClient(&config.OllamaConfig{
 		BaseURL: server.URL,
 		Model:   "test-model",
 		Timeout: 500 * time.Millisecond,
@@ -426,14 +428,14 @@ func TestAnalyzeWithContext(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(generateResponse{
-			Response: "Result with context",
-			Done:     true,
+			Response:  "Result with context",
+			Done:      true,
 			EvalCount: 15,
 		})
 	}))
 	defer server.Close()
 
-	client := NewClient(&Config{
+	client := NewClient(&config.OllamaConfig{
 		BaseURL: server.URL,
 		Model:   "test-model",
 		Timeout: 5 * time.Second,
