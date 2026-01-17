@@ -96,6 +96,7 @@ func (m *Manager) Commit(tx *Transaction) error {
 }
 
 // Rollback rolls back a transaction by reversing its operations
+// Bug Fix #2: Improved error tolerance - collect all errors instead of failing fast
 func (m *Manager) Rollback(tx *Transaction) error {
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
@@ -104,7 +105,9 @@ func (m *Manager) Rollback(tx *Transaction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Reverse operations in reverse order
+	var errors []error
+
+	// Reverse operations in reverse order, collecting all errors
 	for i := len(tx.Operations) - 1; i >= 0; i-- {
 		op := tx.Operations[i]
 
@@ -113,14 +116,14 @@ func (m *Manager) Rollback(tx *Transaction) error {
 			// Restore from backup
 			if op.Backup != "" {
 				if err := os.Rename(op.Target, op.Source); err != nil {
-					return fmt.Errorf("failed to rollback operation: %w", err)
+					errors = append(errors, fmt.Errorf("failed to rollback operation %d: %w", i, err))
 				}
 			}
 		case OpDelete:
 			// Restore from backup
 			if op.Backup != "" {
 				if err := os.Rename(op.Backup, op.Source); err != nil {
-					return fmt.Errorf("failed to rollback delete operation: %w", err)
+					errors = append(errors, fmt.Errorf("failed to rollback delete operation %d: %w", i, err))
 				}
 			}
 		case OpMkdir:
@@ -135,7 +138,12 @@ func (m *Manager) Rollback(tx *Transaction) error {
 
 	// Persist rollback status
 	if err := m.persistTransaction(tx); err != nil {
-		return fmt.Errorf("failed to persist rollback: %w", err)
+		errors = append(errors, fmt.Errorf("failed to persist rollback: %w", err))
+	}
+
+	// If there were any errors, return them as a combined error
+	if len(errors) > 0 {
+		return fmt.Errorf("rollback partially failed with %d error(s): %v", len(errors), errors)
 	}
 
 	return nil
@@ -161,6 +169,7 @@ func (m *Manager) GetHistory(limit int) ([]*Transaction, error) {
 }
 
 // Undo reverses the last committed transaction
+// Bug Fix #2: Improved error tolerance - collect all errors instead of failing fast
 func (m *Manager) Undo(transactionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,7 +188,9 @@ func (m *Manager) Undo(transactionID string) error {
 		return fmt.Errorf("cannot undo transaction with status: %s", tx.Status)
 	}
 
-	// Reverse operations in reverse order
+	var errors []error
+
+	// Reverse operations in reverse order, collecting all errors
 	for i := len(tx.Operations) - 1; i >= 0; i-- {
 		op := tx.Operations[i]
 
@@ -188,14 +199,14 @@ func (m *Manager) Undo(transactionID string) error {
 			// Restore from backup
 			if op.Backup != "" {
 				if err := os.Rename(op.Target, op.Source); err != nil {
-					return fmt.Errorf("failed to undo operation: %w", err)
+					errors = append(errors, fmt.Errorf("failed to undo operation %d: %w", i, err))
 				}
 			}
 		case OpDelete:
 			// Restore from backup
 			if op.Backup != "" {
 				if err := os.Rename(op.Backup, op.Source); err != nil {
-					return fmt.Errorf("failed to undo delete operation: %w", err)
+					errors = append(errors, fmt.Errorf("failed to undo delete operation %d: %w", i, err))
 				}
 			}
 		case OpMkdir:
@@ -210,7 +221,12 @@ func (m *Manager) Undo(transactionID string) error {
 
 	// Persist undo status
 	if err := m.persistTransaction(tx); err != nil {
-		return fmt.Errorf("failed to persist undo: %w", err)
+		errors = append(errors, fmt.Errorf("failed to persist undo: %w", err))
+	}
+
+	// If there were any errors, return them as a combined error
+	if len(errors) > 0 {
+		return fmt.Errorf("undo partially failed with %d error(s): %v", len(errors), errors)
 	}
 
 	return nil

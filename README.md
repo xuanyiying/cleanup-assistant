@@ -19,6 +19,9 @@
 - 📊 **可视化对比** - 清晰展示文件整理前后的目录结构差异
 - 🚫 **智能排除** - 自动跳过版本控制、依赖包等不需要整理的文件
 - 🖥️ **交互式界面** - 支持自然语言命令
+- 🔄 **文件去重** - 智能检测和删除重复文件，节省磁盘空间
+- ⏰ **定时任务** - 自动化定期清理任务
+- 📈 **进度显示** - 实时进度条和 ETA 计算
 
 ## 工作流程
 
@@ -116,19 +119,21 @@ cleanup organize ~/Downloads
 
 ### 常用命令
 
-| 命令                                | 别名      | 说明         |
-| ----------------------------------- | --------- | ------------ |
-| `cleanup`                           |           | 进入交互模式 |
-| `cleanup scan [path]`               | `s`, `sc` | 扫描目录     |
-| `cleanup organize [path]`           | `o`, `org`| 整理文件     |
-| `cleanup organize --dry-run [path]` | `o`       | 预览模式     |
-| `cleanup junk`                      | `j`       | 垃圾清理管理 |
-| `cleanup junk scan`                 | `j s`     | 扫描垃圾文件 |
-| `cleanup junk clean`                | `j c`     | 清理垃圾文件 |
-| `cleanup undo [txn-id]`             | `u`       | 撤销操作     |
-| `cleanup history`                   | `h`, `hist`| 查看历史     |
-| `cleanup version`                   | `v`       | 查看版本     |
-| `cleanup --help`                    |           | 查看帮助     |
+| 命令                                | 别名        | 说明               |
+| ----------------------------------- | ----------- | ------------------ |
+| `cleanup`                           |             | 进入交互模式       |
+| `cleanup scan [path]`               | `s`, `sc`   | 扫描目录           |
+| `cleanup organize [path]`           | `o`, `org`  | 整理文件           |
+| `cleanup organize --dry-run [path]` | `o`         | 预览模式           |
+| `cleanup junk`                      | `j`         | 垃圾清理管理       |
+| `cleanup junk scan`                 | `j s`       | 扫描垃圾文件       |
+| `cleanup junk clean`                | `j c`       | 清理垃圾文件       |
+| `cleanup dedup [path]`              | `dup`       | 查找并删除重复文件 |
+| `cleanup schedule`                  | `sched`     | 管理定时任务       |
+| `cleanup undo [txn-id]`             | `u`         | 撤销操作           |
+| `cleanup history`                   | `h`, `hist` | 查看历史           |
+| `cleanup version`                   | `v`         | 查看版本           |
+| `cleanup --help`                    |             | 查看帮助           |
 
 #### 简写示例
 
@@ -150,6 +155,12 @@ cleanup j s
 
 # 清理垃圾
 cleanup j c
+
+# 查找重复文件
+cleanup dedup ~/Downloads
+
+# 添加定时任务
+cleanup schedule add --id daily --name "Daily Cleanup" --interval @daily --command "cleanup organize ~/Downloads"
 ```
 
 ### 排除文件和文件夹
@@ -297,7 +308,7 @@ cleaner:
   junkLocations:
     - "~/Library/Caches/MyNewApp"
     - "/tmp/my-temp-dir"
-  
+
   # 自定义重要文件模式（清理时跳过）
   importantPatterns:
     - "*.key"

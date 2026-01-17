@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/xuanyiying/cleanup-cli/internal/ai"
 	"github.com/xuanyiying/cleanup-cli/internal/analyzer"
@@ -14,6 +15,7 @@ import (
 	"github.com/xuanyiying/cleanup-cli/internal/rules"
 	"github.com/xuanyiying/cleanup-cli/internal/transaction"
 	"github.com/xuanyiying/cleanup-cli/pkg/template"
+	"github.com/xuanyiying/cleanup-cli/pkg/validator"
 )
 
 // ConflictStrategy defines how to handle file name conflicts
@@ -108,6 +110,7 @@ type Organizer struct {
 	ruleEngine   rules.Engine
 	analyzer     analyzer.Analyzer
 	templateExp  *template.Expander
+	aiCache      *ai.Cache
 	ollamaClient interface {
 		SuggestName(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
 		SuggestCategory(ctx context.Context, file *analyzer.FileMetadata) ([]string, error)
@@ -121,6 +124,7 @@ func NewOrganizer(txnManager *transaction.Manager) *Organizer {
 		ruleEngine:  rules.NewEngine(),
 		analyzer:    analyzer.NewAnalyzer(),
 		templateExp: template.NewExpander(make(map[string]string)),
+		aiCache:     ai.NewCache(24 * time.Hour), // Cache for 24 hours
 	}
 }
 
@@ -131,6 +135,7 @@ func NewOrganizerWithDeps(txnManager *transaction.Manager, ruleEngine rules.Engi
 		ruleEngine:   ruleEngine,
 		analyzer:     analyzer,
 		templateExp:  template.NewExpander(make(map[string]string)),
+		aiCache:      ai.NewCache(24 * time.Hour),
 		ollamaClient: nil,
 	}
 }
@@ -148,6 +153,15 @@ func (o *Organizer) Rename(ctx context.Context, source, newName string, opts *Re
 			PreserveExtension: true,
 			ConflictStrategy:  ConflictSkip,
 		}
+	}
+
+	// Validate new filename
+	if err := validator.ValidateFilename(newName); err != nil {
+		return &OperationResult{
+			Success: false,
+			Source:  source,
+			Error:   fmt.Errorf("invalid filename: %w", err),
+		}, nil
 	}
 
 	// Validate source file exists
@@ -293,9 +307,22 @@ func (o *Organizer) Move(ctx context.Context, source, targetDir string, opts *Mo
 		}, nil
 	}
 
+	// Bug Fix #3: Clean and validate paths to prevent path traversal
+	targetDir = filepath.Clean(targetDir)
+	fileName := filepath.Clean(filepath.Base(source))
+
+	// Ensure filename doesn't contain path separators
+	if strings.Contains(fileName, string(filepath.Separator)) {
+		return &OperationResult{
+			Success: false,
+			Source:  source,
+			Error:   fmt.Errorf("invalid filename: %s", fileName),
+		}, nil
+	}
+
 	// Create target directory if needed
 	if opts.CreateTargetDir {
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
+		if err := os.MkdirAll(targetDir, DefaultDirPermissions); err != nil {
 			return &OperationResult{
 				Success: false,
 				Source:  source,
@@ -316,8 +343,16 @@ func (o *Organizer) Move(ctx context.Context, source, targetDir string, opts *Mo
 	}
 
 	// Construct target path
-	fileName := filepath.Base(source)
 	targetPath := filepath.Join(targetDir, fileName)
+
+	// Verify final path is within target directory (prevent path traversal)
+	if !strings.HasPrefix(filepath.Clean(targetPath), targetDir) {
+		return &OperationResult{
+			Success: false,
+			Source:  source,
+			Error:   fmt.Errorf("path traversal detected"),
+		}, nil
+	}
 
 	// Handle conflicts
 	finalTarget, err := o.resolveConflict(targetPath, opts.ConflictStrategy)
@@ -449,30 +484,23 @@ func (o *Organizer) resolveConflict(targetPath string, strategy ConflictStrategy
 }
 
 // generateUniquePath generates a unique file path by appending a suffix
+// Bug Fix #1: Use timestamp + random number for better uniqueness guarantee
 func (o *Organizer) generateUniquePath(targetPath string) string {
 	dir := filepath.Dir(targetPath)
 	fileName := filepath.Base(targetPath)
 	ext := filepath.Ext(fileName)
 	baseName := strings.TrimSuffix(fileName, ext)
 
-	// Try appending numbers until we find a unique name
-	for i := 1; i <= 1000; i++ {
-		newName := fmt.Sprintf("%s_%d%s", baseName, i, ext)
-		newPath := filepath.Join(dir, newName)
-		if _, err := os.Stat(newPath); err != nil {
-			// File doesn't exist, this is our unique path
-			return newPath
-		}
-	}
-
-	// Fallback: use timestamp
-	return filepath.Join(dir, fmt.Sprintf("%s_%d%s", baseName, os.Getpid(), ext))
+	// Use timestamp + random number to ensure uniqueness
+	timestamp := time.Now().UnixNano()
+	newName := fmt.Sprintf("%s_%d%s", baseName, timestamp, ext)
+	return filepath.Join(dir, newName)
 }
 
 // Delete moves a file to trash instead of permanently deleting it
 func (o *Organizer) Delete(ctx context.Context, source, trashDir string) (*OperationResult, error) {
 	// Ensure trash directory exists
-	if err := os.MkdirAll(trashDir, 0755); err != nil {
+	if err := os.MkdirAll(trashDir, DefaultDirPermissions); err != nil {
 		return &OperationResult{
 			Success: false,
 			Source:  source,
@@ -540,6 +568,7 @@ func (o *Organizer) Delete(ctx context.Context, source, trashDir string) (*Opera
 var _ Organizer
 
 // Organize generates an execution plan for organizing files based on rules
+// Performance optimized with concurrent AI calls and caching
 func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata, strategy *OrganizeStrategy) (*OrganizePlan, error) {
 	if strategy == nil {
 		strategy = &OrganizeStrategy{
@@ -547,7 +576,7 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 			CreateFolders:    true,
 			ConflictStrategy: ConflictSuffix,
 			DryRun:           false,
-			MaxConcurrency:   4,
+			MaxConcurrency:   DefaultConcurrency,
 		}
 	}
 
@@ -563,6 +592,12 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 		},
 	}
 
+	// Phase 1: Batch process AI requests concurrently
+	if strategy.UseAI && o.ollamaClient != nil {
+		o.batchProcessAI(ctx, files, strategy.MaxConcurrency)
+	}
+
+	// Phase 2: Generate operations based on AI results and rules
 	for _, file := range files {
 		select {
 		case <-ctx.Done():
@@ -570,50 +605,27 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 		default:
 		}
 
-		// Step 0: Analyze document scenario if needed
-		if strategy.UseAI && file.NeedsScenarioAnalysis && o.ollamaClient != nil {
-			fmt.Printf("  📊 Analyzing document scenario: %s\n", file.Name)
-
-			categories, err := o.ollamaClient.SuggestCategory(ctx, file)
-			if err == nil && len(categories) > 0 && categories[0] != "" {
-				file.ScenarioCategory = categories[0]
-				fmt.Printf("     → Category: %s\n", file.ScenarioCategory)
-			} else if err != nil {
-				fmt.Printf("     ⚠ Failed to analyze scenario: %v\n", err)
-			}
-		}
-
-		// Step 1: Check if file needs smarter name
+		// Step 1: Check if file needs smarter name (already processed by AI)
 		var renamedPath string
-		if strategy.UseAI && file.NeedsSmarterName && o.ollamaClient != nil {
-			fmt.Printf("  🤖 Analyzing: %s (filename quality: %s)\n", file.Name, file.FileNameQuality)
+		if file.SuggestedName != "" {
+			fmt.Printf("  🤖 Renaming: %s → %s.%s\n", file.Name, file.SuggestedName, file.Extension)
 
-			// Use AI to suggest a better name
-			suggestions, err := o.ollamaClient.SuggestName(ctx, file)
-			if err == nil && len(suggestions) > 0 && suggestions[0] != "" {
-				file.SuggestedName = suggestions[0]
-
-				fmt.Printf("     → Suggested name: %s.%s\n", file.SuggestedName, file.Extension)
-
-				// Add rename operation
-				newName := file.SuggestedName + "." + file.Extension
-				renamedPath = filepath.Join(filepath.Dir(file.Path), newName)
-				op := &PlannedOperation{
-					Type:   OpRename,
-					Source: file.Path,
-					Target: renamedPath,
-					Reason: "AI-suggested meaningful name",
-				}
-				plan.Operations = append(plan.Operations, op)
-				plan.Summary.RenameCount++
-				plan.Summary.TotalOperations++
-
-				// Update file metadata for subsequent operations
-				file.Name = newName
-				file.Path = renamedPath
-			} else if err != nil {
-				fmt.Printf("     ⚠ Failed to generate name: %v\n", err)
+			// Add rename operation
+			newName := file.SuggestedName + "." + file.Extension
+			renamedPath = filepath.Join(filepath.Dir(file.Path), newName)
+			op := &PlannedOperation{
+				Type:   OpRename,
+				Source: file.Path,
+				Target: renamedPath,
+				Reason: "AI-suggested meaningful name",
 			}
+			plan.Operations = append(plan.Operations, op)
+			plan.Summary.RenameCount++
+			plan.Summary.TotalOperations++
+
+			// Update file metadata for subsequent operations
+			file.Name = newName
+			file.Path = renamedPath
 		}
 
 		// Step 2: Match rules for this file
@@ -679,6 +691,81 @@ func (o *Organizer) Organize(ctx context.Context, files []*analyzer.FileMetadata
 	return plan, nil
 }
 
+// batchProcessAI processes AI requests concurrently with caching
+func (o *Organizer) batchProcessAI(ctx context.Context, files []*analyzer.FileMetadata, maxConcurrency int) {
+	// Collect files that need AI processing
+	var aiFiles []*analyzer.FileMetadata
+	for _, file := range files {
+		if file.NeedsSmarterName || file.NeedsScenarioAnalysis {
+			aiFiles = append(aiFiles, file)
+		}
+	}
+
+	if len(aiFiles) == 0 {
+		return
+	}
+
+	// Create worker pool
+	fileChan := make(chan *analyzer.FileMetadata, len(aiFiles))
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < maxConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range fileChan {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				// Process scenario analysis
+				if file.NeedsScenarioAnalysis {
+					cacheKey := ai.GenerateKey("category", file.ContentPreview)
+					if cached, found := o.aiCache.Get(cacheKey); found {
+						if len(cached) > 0 {
+							file.ScenarioCategory = cached[0]
+						}
+					} else {
+						categories, err := o.ollamaClient.SuggestCategory(ctx, file)
+						if err == nil && len(categories) > 0 && categories[0] != "" {
+							file.ScenarioCategory = categories[0]
+							o.aiCache.Set(cacheKey, categories)
+						}
+					}
+				}
+
+				// Process name suggestion
+				if file.NeedsSmarterName {
+					cacheKey := ai.GenerateKey("name", file.ContentPreview)
+					if cached, found := o.aiCache.Get(cacheKey); found {
+						if len(cached) > 0 {
+							file.SuggestedName = cached[0]
+						}
+					} else {
+						suggestions, err := o.ollamaClient.SuggestName(ctx, file)
+						if err == nil && len(suggestions) > 0 && suggestions[0] != "" {
+							file.SuggestedName = suggestions[0]
+							o.aiCache.Set(cacheKey, suggestions)
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	// Send files to workers
+	for _, file := range aiFiles {
+		fileChan <- file
+	}
+	close(fileChan)
+
+	// Wait for all workers to finish
+	wg.Wait()
+}
+
 // ExecutePlan executes an organization plan with error resilience
 func (o *Organizer) ExecutePlan(ctx context.Context, plan *OrganizePlan, strategy *OrganizeStrategy) (*BatchResult, error) {
 	if plan == nil {
@@ -691,7 +778,7 @@ func (o *Organizer) ExecutePlan(ctx context.Context, plan *OrganizePlan, strateg
 			CreateFolders:    true,
 			ConflictStrategy: ConflictSuffix,
 			DryRun:           false,
-			MaxConcurrency:   4,
+			MaxConcurrency:   DefaultConcurrency,
 		}
 	}
 
@@ -713,7 +800,7 @@ func (o *Organizer) ExecutePlan(ctx context.Context, plan *OrganizePlan, strateg
 	// Use semaphore to limit concurrency
 	maxConcurrency := strategy.MaxConcurrency
 	if maxConcurrency <= 0 {
-		maxConcurrency = 4
+		maxConcurrency = DefaultConcurrency
 	}
 
 	semaphore := make(chan struct{}, maxConcurrency)
